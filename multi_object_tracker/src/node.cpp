@@ -30,7 +30,7 @@ MultiObjectTrackerNode::MultiObjectTrackerNode() : nh_(""), pnh_("~"), tf_listen
     // sub_ = nh_.subscribe("input", 1, &MultiObjectTrackerNode::measurementCallback, this);
     pub_ = nh_.advertise<autoware_msgs::DynamicObjectArray>("output", 1, true);
     double publish_rate;
-    pnh_.param<double>("publish_rate", publish_rate, double(10.0));
+    pnh_.param<double>("publish_rate", publish_rate, double(30.0));
     publish_timer_ = nh_.createTimer(ros::Duration(1.0 / publish_rate), &MultiObjectTrackerNode::publishTimerCallback, this);
     pnh_.param<std::string>("base_link_frame_id", base_link_frame_id_, std::string("base_link"));
     pnh_.param<std::string>("world_frame_id", world_frame_id_, std::string("world"));
@@ -58,11 +58,11 @@ void MultiObjectTrackerNode::measurementCallback(const autoware_msgs::DynamicObj
         {
             geometry_msgs::TransformStamped ros_current_pose2objects_world;
             ros_current_pose2objects_world = tf_buffer_.lookupTransform(/*target*/ base_link_frame_id_, /*src*/ input_transformed_objects.header.frame_id,
-                                                                        input_transformed_objects.header.stamp);
+                                                                        input_transformed_objects.header.stamp, ros::Duration(0.5));
             tf2::fromMsg(ros_current_pose2objects_world.transform, tf_current_pose2objects_world);
             geometry_msgs::TransformStamped ros_world2current_pose_world;
-            ros_world2current_pose_world = tf_buffer_.lookupTransform(/*target*/ world_frame_id_, /*src*/ "map", //input_current_pose_msg->header.frame_id,
-                                                                      input_current_pose_msg->header.stamp);
+            ros_world2current_pose_world = tf_buffer_.lookupTransform(/*target*/ world_frame_id_, /*src*/ input_current_pose_msg->header.frame_id,
+                                                                      input_current_pose_msg->header.stamp, ros::Duration(0.5));
             tf2::fromMsg(ros_world2current_pose_world.transform, tf_world2current_pose_world);
         }
         catch (tf2::TransformException &ex)
@@ -80,10 +80,11 @@ void MultiObjectTrackerNode::measurementCallback(const autoware_msgs::DynamicObj
     }
 
     /* tracker prediction */
-    ros::Time current_time = ros::Time::now();
+    ros::Time measuremet_time = input_objects_msg->header.stamp;
+    // ros::Time measuremet_time = ros::Time::now();
     for (auto itr = list_tracker_.begin(); itr != list_tracker_.end(); ++itr)
     {
-        (*itr)->predict(current_time);
+        (*itr)->predict(measuremet_time);
     }
 
     /* life cycle check */
@@ -101,9 +102,9 @@ void MultiObjectTrackerNode::measurementCallback(const autoware_msgs::DynamicObj
     {
         if (direct_assignment.find(tracker_idx) != direct_assignment.end()) // found
         {
-            (*(tracker_itr))->updateWithMeasurement(input_transformed_objects.feature_objects.at(direct_assignment.find(tracker_idx)->second).object, current_time);
+            (*(tracker_itr))->updateWithMeasurement(input_transformed_objects.feature_objects.at(direct_assignment.find(tracker_idx)->second).object, measuremet_time);
         }
-        else
+        else // not found
         {
             (*(tracker_itr))->updateWithoutMeasurement();
         }
@@ -119,16 +120,16 @@ void MultiObjectTrackerNode::measurementCallback(const autoware_msgs::DynamicObj
             input_transformed_objects.feature_objects.at(i).object.semantic.type == autoware_msgs::Semantic::TRUCK ||
             input_transformed_objects.feature_objects.at(i).object.semantic.type == autoware_msgs::Semantic::BUS)
         {
-            list_tracker_.push_back(std::make_shared<VehicleTracker>(input_transformed_objects.feature_objects.at(i).object));
+            list_tracker_.push_back(std::make_shared<VehicleTracker>(measuremet_time, input_transformed_objects.feature_objects.at(i).object));
         }
         else if (input_transformed_objects.feature_objects.at(i).object.semantic.type == autoware_msgs::Semantic::PEDESTRIAN)
         {
-            list_tracker_.push_back(std::make_shared<PedestrianTracker>(input_transformed_objects.feature_objects.at(i).object));
+            list_tracker_.push_back(std::make_shared<PedestrianTracker>(measuremet_time, input_transformed_objects.feature_objects.at(i).object));
         }
         else if (input_transformed_objects.feature_objects.at(i).object.semantic.type == autoware_msgs::Semantic::BICYCLE ||
                  input_transformed_objects.feature_objects.at(i).object.semantic.type == autoware_msgs::Semantic::MOTORBIKE)
         {
-            list_tracker_.push_back(std::make_shared<BicycleTracker>(input_transformed_objects.feature_objects.at(i).object));
+            list_tracker_.push_back(std::make_shared<BicycleTracker>(measuremet_time, input_transformed_objects.feature_objects.at(i).object));
         }
         else
         {
@@ -143,13 +144,6 @@ void MultiObjectTrackerNode::publishTimerCallback(const ros::TimerEvent &e)
     if (pub_.getNumSubscribers() < 1)
         return;
 
-    /* tracker prediction */
-    ros::Time current_time = ros::Time::now();
-    for (auto itr = list_tracker_.begin(); itr != list_tracker_.end(); ++itr)
-    {
-        (*itr)->predict(current_time);
-    }
-
     /* life cycle check */
     for (auto itr = list_tracker_.begin(); itr != list_tracker_.end(); ++itr)
     {
@@ -162,16 +156,16 @@ void MultiObjectTrackerNode::publishTimerCallback(const ros::TimerEvent &e)
     }
 
     // Create output msg
+    ros::Time current_time = ros::Time::now();
     autoware_msgs::DynamicObjectArray output_msg;
     output_msg.header.frame_id = world_frame_id_;
-    // output_msg.header.frame_id = "velodyne"; // TODO
     output_msg.header.stamp = current_time;
     for (auto itr = list_tracker_.begin(); itr != list_tracker_.end(); ++itr)
     {
         if ((*itr)->getTotalMeasurementCount() < 3)
             continue;
         autoware_msgs::DynamicObject object;
-        (*itr)->getEstimatedDynamicObject(object);
+        (*itr)->getEstimatedDynamicObject(current_time, object);
         output_msg.objects.push_back(object);
     }
 

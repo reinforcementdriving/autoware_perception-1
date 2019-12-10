@@ -26,8 +26,8 @@
 #include <Eigen/Core>
 #include <Eigen/Geometry>
 
-VehicleTracker::VehicleTracker(const autoware_msgs::DynamicObject &object)
-    : Tracker(object.semantic.type),
+VehicleTracker::VehicleTracker(const ros::Time &time, const autoware_msgs::DynamicObject &object)
+    : Tracker(time, object.semantic.type),
       filtered_yaw_(0.0),
       yaw_filter_gain_(0.7),
       is_fixed_yaw_(object.state.pose_reliable),
@@ -35,12 +35,15 @@ VehicleTracker::VehicleTracker(const autoware_msgs::DynamicObject &object)
       is_fixed_dim_(false),
       filtered_posx_(object.state.pose.pose.position.x),
       filtered_posy_(object.state.pose.pose.position.y),
+      pos_filter_gain_(0.2),
       filtered_vx_(0.0),
       filtered_vy_(0.0),
       v_filter_gain_(0.7),
       area_filter_gain_(0.8),
-      prediction_time(ros::Time::now()),
-      measurement_time(ros::Time::now())
+      last_measurement_posx_(object.state.pose.pose.position.x),
+      last_measurement_posy_(object.state.pose.pose.position.y),
+      last_update_time_(time),
+      last_measurement_time_(time)
 {
     object_ = object;
     // yaw
@@ -66,7 +69,7 @@ VehicleTracker::VehicleTracker(const autoware_msgs::DynamicObject &object)
 
 bool VehicleTracker::predict(const ros::Time &time)
 {
-    double dt = (time - prediction_time).toSec();
+    double dt = (time - last_update_time_).toSec();
     if (dt < 0.0)
         dt = 0.0;
     double vel = std::cos(filtered_yaw_) * filtered_vx_ + std::sin(filtered_yaw_) * filtered_vy_;
@@ -84,7 +87,7 @@ bool VehicleTracker::predict(const ros::Time &time)
         // filtered_posx_ += filtered_vx_ * dt;
         // filtered_posy_ += filtered_vy_ * dt;
     }
-    prediction_time = time;
+    last_update_time_ = time;
     return true;
 }
 bool VehicleTracker::measure(const autoware_msgs::DynamicObject &object, const ros::Time &time)
@@ -152,24 +155,28 @@ bool VehicleTracker::measure(const autoware_msgs::DynamicObject &object, const r
     filtered_area_ = area_filter_gain_ * filtered_area_ + (1.0 - area_filter_gain_) * utils::getArea(object.shape);
 
     // vx,vy
-    double dt = (time - measurement_time).toSec();
-    measurement_time = time;
+    double dt = (time - last_measurement_time_).toSec();
+    last_measurement_time_ = time;
+    last_update_time_ = time;
     if (0.0 < dt)
     {
         double current_vel =
-            std::sqrt((object.state.pose.pose.position.x - filtered_posx_) * (object.state.pose.pose.position.x - filtered_posx_) + (object.state.pose.pose.position.y - filtered_posy_) * (object.state.pose.pose.position.y - filtered_posy_));
+            std::sqrt((object.state.pose.pose.position.x - last_measurement_posx_) *
+                          (object.state.pose.pose.position.x - last_measurement_posx_) +
+                      (object.state.pose.pose.position.y - last_measurement_posy_) *
+                          (object.state.pose.pose.position.y - last_measurement_posy_));
         const double max_vel = 20.0; /* [m/s]*/
         const double vel_scale = std::min(max_vel, current_vel) / current_vel;
 
         if (is_changed_unknown_object)
         {
-            filtered_vx_ = 0.95 * filtered_vx_ + (1.0 - 0.95) * ((object.state.pose.pose.position.x - filtered_posx_) / dt) * vel_scale;
-            filtered_vy_ = 0.95 * filtered_vy_ + (1.0 - 0.95) * ((object.state.pose.pose.position.y - filtered_posy_) / dt) * vel_scale;
+            filtered_vx_ = 0.95 * filtered_vx_ + (1.0 - 0.95) * ((object.state.pose.pose.position.x - last_measurement_posx_) / dt) * vel_scale;
+            filtered_vy_ = 0.95 * filtered_vy_ + (1.0 - 0.95) * ((object.state.pose.pose.position.y - last_measurement_posy_) / dt) * vel_scale;
         }
         else
         {
-            filtered_vx_ = v_filter_gain_ * filtered_vx_ + (1.0 - v_filter_gain_) * ((object.state.pose.pose.position.x - filtered_posx_) / dt) * vel_scale;
-            filtered_vy_ = v_filter_gain_ * filtered_vy_ + (1.0 - v_filter_gain_) * ((object.state.pose.pose.position.y - filtered_posy_) / dt) * vel_scale;
+            filtered_vx_ = v_filter_gain_ * filtered_vx_ + (1.0 - v_filter_gain_) * ((object.state.pose.pose.position.x - last_measurement_posx_) / dt) * vel_scale;
+            filtered_vy_ = v_filter_gain_ * filtered_vy_ + (1.0 - v_filter_gain_) * ((object.state.pose.pose.position.y - last_measurement_posy_) / dt) * vel_scale;
             v_filter_gain_ = std::min(0.9, v_filter_gain_ + 0.15);
         }
 
@@ -179,18 +186,21 @@ bool VehicleTracker::measure(const autoware_msgs::DynamicObject &object, const r
     }
 
     // pos x, pos y
-    filtered_posx_ = object.state.pose.pose.position.x;
-    filtered_posy_ = object.state.pose.pose.position.y;
-    // filtered_posx_ = pos_filter_gain_ * filtered_posx_ + (1.0 - pos_filter_gain_) * object.state.pose.pose.position.x;
-    // filtered_posy_ = pos_filter_gain_ * filtered_posy_ + (1.0 - pos_filter_gain_) * object.state.pose.pose.position.y;
+    // filtered_posx_ = object.state.pose.pose.position.x;
+    // filtered_posy_ = object.state.pose.pose.position.y;
+    last_measurement_posx_ = object.state.pose.pose.position.x;
+    last_measurement_posy_ = object.state.pose.pose.position.y;
+    filtered_posx_ = pos_filter_gain_ * filtered_posx_ + (1.0 - pos_filter_gain_) * object.state.pose.pose.position.x;
+    filtered_posy_ = pos_filter_gain_ * filtered_posy_ + (1.0 - pos_filter_gain_) * object.state.pose.pose.position.y;
+    pos_filter_gain_ = std::min(0.8, pos_filter_gain_ + 0.05);
 
     return true;
 }
 
-bool VehicleTracker::getEstimatedDynamicObject(autoware_msgs::DynamicObject &object)
+bool VehicleTracker::getEstimatedDynamicObject(const ros::Time &time, autoware_msgs::DynamicObject &object)
 {
     object = object_;
-    object.id = unique_id::toMsg(uuid_);
+    object.id = unique_id::toMsg(getUUID());
     object.semantic.type = getType();
 
     if (object.shape.type == autoware_msgs::Shape::BOUNDING_BOX)
@@ -209,8 +219,24 @@ bool VehicleTracker::getEstimatedDynamicObject(autoware_msgs::DynamicObject &obj
         object.shape.dimensions.x = filtered_dim_x_;
         object.shape.dimensions.y = filtered_dim_y_;
     }
+
+
     object.state.pose.pose.position.x = filtered_posx_;
     object.state.pose.pose.position.y = filtered_posy_;
+    double dt = (time - last_update_time_).toSec();
+    if (dt < 0.0)
+        dt = 0.0;
+    double vel = std::cos(filtered_yaw_) * filtered_vx_ + std::sin(filtered_yaw_) * filtered_vy_;
+    if (vel < 0.0 && !is_fixed_yaw_)
+    {
+        object.state.pose.pose.position.x += std::cos(filtered_yaw_ + M_PI) * std::fabs(vel) * dt;
+        object.state.pose.pose.position.y += std::sin(filtered_yaw_ + M_PI) * std::fabs(vel) * dt;
+    }
+    else
+    {
+        object.state.pose.pose.position.x += std::cos(filtered_yaw_) * vel * dt;
+        object.state.pose.pose.position.y += std::sin(filtered_yaw_) * vel * dt;
+    }
 
     double roll, pitch, yaw;
     tf2::Quaternion quaternion;
@@ -231,16 +257,16 @@ bool VehicleTracker::getEstimatedDynamicObject(autoware_msgs::DynamicObject &obj
     return true;
 }
 
-geometry_msgs::Point VehicleTracker::getPosition()
-{
-    geometry_msgs::Point position;
-    position.x = filtered_posx_;
-    position.y = filtered_posy_;
-    position.z = object_.state.pose.pose.position.z;
-    return position;
-}
+// geometry_msgs::Point VehicleTracker::getPosition(const ros::Time &time)
+// {
+//     geometry_msgs::Point position;
+//     position.x = filtered_posx_;
+//     position.y = filtered_posy_;
+//     position.z = object_.state.pose.pose.position.z;
+//     return position;
+// }
 
-double VehicleTracker::getArea()
-{
-    return filtered_area_;
-}
+// double VehicleTracker::getArea()
+// {
+//     return filtered_area_;
+// }

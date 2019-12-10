@@ -24,13 +24,6 @@ class PedestrianTracker : public Tracker
 {
 private:
   autoware_msgs::DynamicObject object_;
-  double filtered_yaw_;
-  double yaw_filter_gain_;
-  bool is_fixed_yaw_;
-  double filtered_dim_x_;
-  double filtered_dim_y_;
-  double dim_filter_gain_;
-  bool is_fixed_dim_;
   double filtered_posx_;
   double filtered_posy_;
   double pos_filter_gain_;
@@ -39,16 +32,16 @@ private:
   double v_filter_gain_;
   double filtered_area_;
   double area_filter_gain_;
-  ros::Time prediction_time;
-  ros::Time measurement_time;
+  double last_measurement_posx_;
+  double last_measurement_posy_;
+  ros::Time last_update_time_;
+  ros::Time last_measurement_time_;
 
 public:
-  PedestrianTracker(const autoware_msgs::DynamicObject &object);
+  PedestrianTracker(const ros::Time &time, const autoware_msgs::DynamicObject &object);
 
   bool predict(const ros::Time &time) override;
   bool measure(const autoware_msgs::DynamicObject &object, const ros::Time &time) override;
-  bool getEstimatedDynamicObject(autoware_msgs::DynamicObject &object) override;
-  geometry_msgs::Point getPosition() override;
-  double getArea() override;
+  bool getEstimatedDynamicObject(const ros::Time &time, autoware_msgs::DynamicObject &object) override;
   virtual ~PedestrianTracker(){};
 };

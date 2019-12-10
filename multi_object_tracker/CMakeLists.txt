@@ -40,11 +40,12 @@ add_executable(multi_object_tracker_node
                src/main.cpp
                src/node.cpp
                src/utils/utils.cpp
+               src/tracker/model/tracker_base.cpp
                src/tracker/model/vehicle_tracker.cpp
                src/tracker/model/bicycle_tracker.cpp
                src/tracker/model/pedestrian_tracker.cpp
                src/data_association/data_association.cpp
-               src/data_association/hungarian/hungarian.cc)
+               src/data_association/successive_shortest_path/successive_shortest_path.cpp)
 
 add_dependencies(multi_object_tracker_node ${${PROJECT_NAME}_EXPORTED_TARGETS}
                  ${catkin_EXPORTED_TARGETS})

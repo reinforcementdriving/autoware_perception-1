@@ -39,16 +39,16 @@ private:
   double v_filter_gain_;
   double filtered_area_;
   double area_filter_gain_;
-  ros::Time prediction_time;
-  ros::Time measurement_time;
+  double last_measurement_posx_;
+  double last_measurement_posy_;
+  ros::Time last_update_time_;
+  ros::Time last_measurement_time_;
 
 public:
-  VehicleTracker(const autoware_msgs::DynamicObject &object);
+  VehicleTracker(const ros::Time &time, const autoware_msgs::DynamicObject &object);
 
   bool predict(const ros::Time &time) override;
   bool measure(const autoware_msgs::DynamicObject &object, const ros::Time &time) override;
-  bool getEstimatedDynamicObject(autoware_msgs::DynamicObject &object) override;
-  geometry_msgs::Point getPosition() override;
-  double getArea() override;
+  bool getEstimatedDynamicObject(const ros::Time &time, autoware_msgs::DynamicObject &object) override;
   virtual ~VehicleTracker(){};
 };

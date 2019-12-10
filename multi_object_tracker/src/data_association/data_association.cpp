@@ -18,10 +18,9 @@
  */
 
 #include "multi_object_tracker/data_association/data_association.hpp"
-#include "hungarian/hungarian.h"
 #include "multi_object_tracker/utils/utils.hpp"
+#include "successive_shortest_path/successive_shortest_path.h"
 
-// #include <iostream>
 DataAssociation::DataAssociation()
     : score_threshold_(0.1)
 {
@@ -123,7 +122,9 @@ bool DataAssociation::assign(const Eigen::MatrixXd &src,
             score.at(row).at(col) = src(row, col);
         }
     }
-    operations_research::MaximizeLinearAssignment(score, &direct_assignment, &reverse_assignment);
+    // Solve
+    assignment_problem::MaximizeLinearAssignment(score, &direct_assignment, &reverse_assignment);
+
     for (auto itr = direct_assignment.begin(); itr != direct_assignment.end();)
     {
         if (src(itr->first, itr->second) < score_threshold_)
@@ -165,7 +166,7 @@ Eigen::MatrixXd DataAssociation::calcScoreMatrix(const autoware_msgs::DynamicObj
                 double max_dist = max_dist_matrix_((*tracker_itr)->getType(), measurements.feature_objects.at(measurement_idx).object.semantic.type);
                 double max_area = max_area_matrix_((*tracker_itr)->getType(), measurements.feature_objects.at(measurement_idx).object.semantic.type);
                 double min_area = min_area_matrix_((*tracker_itr)->getType(), measurements.feature_objects.at(measurement_idx).object.semantic.type);
-                double dist = getDistance(measurements.feature_objects.at(measurement_idx).object.state.pose.pose.position, (*tracker_itr)->getPosition());
+                double dist = getDistance(measurements.feature_objects.at(measurement_idx).object.state.pose.pose.position, (*tracker_itr)->getPosition(measurements.header.stamp));
                 double area = utils::getArea(measurements.feature_objects.at(measurement_idx).object.shape);
                 score = (max_dist - std::min(dist, max_dist)) / max_dist;
 
